@@ -1,0 +1,63 @@
+# params/template.yaml — starting point for a new simulation scenario.
+# SIMULATION settings only (wind speed, turbulence, solver, processor
+# count). Layout/geometry/mesh resolution live in the separate mesh-params
+# file this references via `mesh:` below — build that mesh once with
+# `./make_mesh <name>` (see mesh_params/template.yaml), then run this as
+# many times as you like (different wind/solver settings) without ever
+# re-meshing.
+#
+# Copy this file to params/<your-name>.yaml, edit it, then run with:
+#   ./run_simulation <your-name>
+
+# --- Which pre-built mesh to use (see mesh_params/<name>.yaml, build with
+# `./make_mesh <name>`) — wind angle lives there too, since the mesh geometry
+# is pre-rotated to match it; only wind SPEED is a simulation-level setting.
+mesh: template
+
+# --- Run name --------------------------------------------------------------
+# Used for the saved physics-summary filename and case metadata. Leave blank
+# ("") to fall back to the mesh name.
+run_name: "template"
+
+# --- Wind ---------------------------------------------------------------
+wind_speed: 20.0        # m/s
+turbulence_intensity: 0.05
+
+# --- Air properties (rarely need to change) ---------------------------------
+rho_air: 1.25  #1.25 kg/m3
+nu_air: 1.5e-05
+
+# --- Solver run length / output frequency (STEADY MODE ONLY — ignored since
+# simulation_mode is "transient" below; see the transient_* settings instead) --
+end_time: 1000
+write_interval: 100
+
+# --- Parallel execution -------------------------------------------------
+num_processors: 36   # cores for decomposePar/mpirun. Override per-run with
+                       # `./run_simulation <scenario> <num-cores>` instead of
+                       # editing this, if you just want a one-off change.
+
+# --- Time integration mode -----------------------------------------------
+# "steady"    -> SIMPLE algorithm, cheap, gives a MEAN-flow-only answer.
+#                Cannot capture peak loads from vortex shedding/gusts.
+# "transient" -> PIMPLE algorithm, resolves real unsteady flow (vortex
+#                shedding between/around stacks) — MUCH more expensive
+#                (roughly 10-100x), but needed if you actually care about
+#                PEAK loads rather than time-averaged ones (toppling is
+#                triggered by peaks, not averages).
+#simulation_mode: "steady"
+simulation_mode: "transient"
+
+#turbulence_model: "kEpsilon"
+turbulence_model: "kOmegaSST"
+  # "kEpsilon" (robust default, used for steady) or
+                                # "kOmegaSST" (better resolves unsteady separated
+                                # flow — recommended whenever simulation_mode is
+                                # "transient")
+
+# --- Transient-only settings (ignored when simulation_mode is "steady") ---
+max_courant_number: 1.0        # deltaT auto-adjusts every step to keep Courant number
+                                 # at/below this (stability limit, standard practice)
+spinup_time: 8.0                # seconds of real time to run and DISCARD first
+transient_end_time: 40.0        # total real seconds to simulate, INCLUDING spinup_time
+transient_write_interval: 0.2   # seconds between full field snapshots

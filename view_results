@@ -1,0 +1,84 @@
+#!/bin/bash
+# Author: Arjun Thenery Manikantan
+# Made for the Mathematics for Industry 2026 study week (BE-MATHS-IN, PSA
+# Antwerp problem) — https://be-maths-in.be/mfi26/problems/
+# Uses OpenFOAM (openfoam.com) for CFD meshing/solving.
+#
+# view_results — 3D visualization of a finished simulation's results:
+# surface pressure on every container face, and streamlines of the flow
+# through the stacks. Uses time-averaged pressure/velocity (pMean/UMean)
+# when available (transient runs, after spin-up), else falls back to
+# instantaneous fields (steady runs, or a transient run too short to have
+# any averaged data yet). Opens an interactive 3D window (needs a display).
+#
+# The mesh (constant/polyMesh, view_geometry/) is NOT duplicated into each
+# out/<name>_<timestamp>/ folder — it's symlinked straight back to the
+# already-saved mesh/<name>/ this run used. Same idea for the viewer script
+# itself: it's not copied into the output folder either (same as
+# mesh/<name>/ never getting its own copy of inspect_mesh.py) — this just
+# cd's into the results and runs tools/view_results_3d.py directly.
+#
+# Usage:
+#   ./view_results <output-name>          # exact out/<output-name>/ folder
+#   ./view_results <scenario-name>        # bare scenario name -> picks the
+#                                          # MOST RECENT out/<scenario-name>_*/
+#                                          # folder (there can be several,
+#                                          # one per ./run_simulation call)
+#
+# For the top-down pressure/velocity map instead of the 3D view, run
+# python3 ../../tools/view_results_topdown.py from inside the output folder.
+
+set -e
+
+if [ -z "$1" ]; then
+    echo "Usage: ./view_results <output-name-or-scenario-name>" >&2
+    exit 1
+fi
+ARG="$1"
+
+cd "$(dirname "$0")"   # always run relative to this script's own folder
+
+# Resolve ARG to an out/ folder: an exact match first, else the most recent
+# out/<ARG>_<timestamp>/ folder (./run_simulation names output folders
+# <scenario-name>_<timestamp>, so a bare scenario name has to pick one).
+if [ -d "out/$ARG" ]; then
+    OUT_DIR="out/$ARG"
+else
+    OUT_DIR=""
+    for d in $(ls -1d out/"$ARG"_*/ 2>/dev/null | sort); do
+        OUT_DIR="${d%/}"   # keep overwriting -> ends on the latest (sorts chronologically)
+    done
+fi
+
+if [ -z "$OUT_DIR" ] || [ ! -d "$OUT_DIR" ]; then
+    echo "No results found for '$ARG' under out/" >&2
+    echo "Tried: out/$ARG, out/${ARG}_<timestamp>" >&2
+    echo "Available results in out/:" >&2
+    for d in out/*/; do
+        [ -d "$d" ] && echo "  $(basename "$d")" >&2
+    done
+    exit 1
+fi
+
+if [ ! -f "$OUT_DIR/case_meta.json" ]; then
+    echo "$OUT_DIR has no case_meta.json — was it produced by ./run_simulation?" >&2
+    exit 1
+fi
+
+# --- Make sure python3 has pyvista available ---
+if [ -z "$VIRTUAL_ENV" ]; then
+    if [ -f ".venv/bin/activate" ]; then
+        source ".venv/bin/activate"                                  # local venv (see ./setup)
+    elif [ -f "../psa/bin/activate" ]; then
+        source "../psa/bin/activate"                                 # local, one level under project root
+    elif [ -f "../../psa/bin/activate" ]; then
+        source "../../psa/bin/activate"                              # local, two levels under project root
+    else
+        echo "Warning: no known Python venv found — run ./setup first," >&2
+        echo "or relying on system python3 already having pyvista installed." >&2
+    fi
+fi
+
+echo "Viewing results from $OUT_DIR"
+cd "$OUT_DIR"
+python3 ../../tools/view_results_3d.py

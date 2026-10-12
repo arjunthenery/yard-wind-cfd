@@ -1,0 +1,142 @@
+#!/bin/bash
+# Author: Arjun Thenery Manikantan
+# Made for the Mathematics for Industry 2026 study week (BE-MATHS-IN, PSA
+# Antwerp problem) — https://be-maths-in.be/mfi26/problems/
+# Uses OpenFOAM (openfoam.com) for CFD meshing/solving.
+#
+# run_simulation — pick a simulation scenario, build its case (boundary
+# conditions, solver settings) against an ALREADY-BUILT mesh, run it, and
+# save everything into its own folder under out/.
+#
+# Two-step workflow:
+#   1. ./make_mesh <mesh-name>        # once per layout (see mesh_params/) —
+#                                      # builds and caches the mesh in mesh/<mesh-name>/
+#   2. ./run_simulation <scenario>    # as many times as you like — different wind
+#                                      # speed/turbulence/solver settings, same mesh
+#
+# Usage:
+#   ./run_simulation <scenario-name>                    # looks up params/<scenario-name>.yaml
+#   ./run_simulation path/to/some_params.yaml
+#   ./run_simulation <num-cores> <scenario-name>         # override num_processors from the
+#   ./run_simulation <scenario-name> <num-cores>         # params file (either argument order works)
+#
+# Scenarios available out of the box (see params/, and the mesh each one
+# references via its own `mesh:` field — build that first with ./make_mesh):
+#   single_module   single yard module, 25 m/s @ 292.5 deg
+#   template        starting point for a new scenario
+# Add your own by dropping a new <name>.yaml into params/ (with a `mesh:`
+# field pointing at a mesh you've built).
+#
+# Output goes to: out/<scenario-name>_<timestamp>/
+# That folder is fully self-contained (its own params.yaml, build_case.py,
+# viewer/post-processing scripts, run_case.sh, and a COPY of the mesh it
+# used) — so it can be opened, re-run, or shared on its own later.
+
+set -e
+
+# Scan all args: a purely-numeric one is the processor-count override (in
+# either position), whatever's left is the scenario name/path.
+NUM_PROC_OVERRIDE=""
+ARG=""
+for a in "$@"; do
+    if [[ "$a" =~ ^[0-9]+$ ]]; then
+        NUM_PROC_OVERRIDE="$a"
+    else
+        ARG="$a"
+    fi
+done
+
+if [ -z "$ARG" ]; then
+    echo "Usage: ./run_simulation [num-cores] <scenario-name-or-path-to-params.yaml> [num-cores]" >&2
+    echo "  e.g.: ./run_simulation single_module" >&2
+    echo "        ./run_simulation 4 single_module     (use 4 cores instead of the params file's default)" >&2
+    exit 1
+fi
+
+cd "$(dirname "$0")"   # always run relative to this script's own folder
+
+# Resolve ARG to an actual params file: a literal path (as given, or relative
+# to this folder), else a bare scenario name looked up in params/.
+if [ -f "$ARG" ]; then
+    PARAMS_FILE="$ARG"
+elif [ -f "params/$ARG.yaml" ]; then
+    PARAMS_FILE="params/$ARG.yaml"
+elif [ -f "params/$ARG" ]; then
+    PARAMS_FILE="params/$ARG"
+else
+    echo "Params file not found: $ARG" >&2
+    echo "Tried: $ARG, params/$ARG.yaml" >&2
+    echo "Available scenarios in params/:" >&2
+    for f in params/*.yaml; do
+        [ -f "$f" ] && echo "  $(basename "$f" .yaml)" >&2
+    done
+    exit 1
+fi
+
+# --- Make sure python3 has pyyaml/numpy-stl available (not needed if a venv
+# is already active) ---
+if [ -z "$VIRTUAL_ENV" ]; then
+    if [ -f ".venv/bin/activate" ]; then
+        source ".venv/bin/activate"                                  # local venv (see ./setup)
+    elif [ -f "../psa/bin/activate" ]; then
+        source "../psa/bin/activate"                                 # local, one level under project root
+    elif [ -f "../../psa/bin/activate" ]; then
+        source "../../psa/bin/activate"                              # local, two levels under project root
+    else
+        echo "Warning: no known Python venv found — run ./setup first," >&2
+        echo "or relying on system python3 already having pyyaml + numpy-stl installed." >&2
+    fi
+fi
+
+NAME=$(basename "$PARAMS_FILE" .yaml)
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+OUT_DIR="out/${NAME}_${TIMESTAMP}"
+
+# OpenFOAM's fileName handling FATALLY errors on any path containing a space
+# ("fileName::stripInvalid() ... For debug level (= 2) > 1 this is considered
+# fatal"). So if we're running somewhere with a space in the path, stage the
+# actual mesh+solve in a space-free /tmp directory instead, then move the
+# finished case into out/ afterwards. Case *generation* (pure Python/YAML) is
+# unaffected by this and always writes straight to OUT_DIR.
+HERE="$(pwd)"
+case "$HERE" in
+    *" "*)
+        BUILD_DIR="/tmp/yard_pipeline_stage/${NAME}_${TIMESTAMP}"
+        echo "Note: this folder's path contains a space, which OpenFOAM cannot run from."
+        echo "Staging the mesh+solve in $BUILD_DIR, then moving the result into $OUT_DIR."
+        ;;
+    *)
+        BUILD_DIR="$OUT_DIR"
+        ;;
+esac
+
+echo "=================================================="
+echo "Building case '$NAME' from $PARAMS_FILE"
+if [ -n "$NUM_PROC_OVERRIDE" ]; then
+    echo "Processor override: $NUM_PROC_OVERRIDE cores (overrides num_processors in the params file)"
+fi
+echo "=================================================="
+if [ -n "$NUM_PROC_OVERRIDE" ]; then
+    python3 core/build_case.py --params "$PARAMS_FILE" --out "$BUILD_DIR" --procs "$NUM_PROC_OVERRIDE"
+else
+    python3 core/build_case.py --params "$PARAMS_FILE" --out "$BUILD_DIR"
+fi
+
+echo ""
+echo "=================================================="
+echo "Running the pipeline (mesh + solve) — see $BUILD_DIR/run_case.sh"
+echo "=================================================="
+bash "$BUILD_DIR/run_case.sh"
+
+if [ "$BUILD_DIR" != "$OUT_DIR" ]; then
+    echo ""
+    echo "Moving finished case from $BUILD_DIR to $OUT_DIR ..."
+    mkdir -p "$(dirname "$OUT_DIR")"
+    mv "$BUILD_DIR" "$OUT_DIR"
+fi
+
+echo ""
+echo "=================================================="
+echo "ALL DONE — results in: $OUT_DIR"
+echo "View with:  ./view_results $NAME"
+echo "=================================================="

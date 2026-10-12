@@ -1,0 +1,159 @@
+#!/bin/bash
+# Author: Arjun Thenery Manikantan
+# Made for the Mathematics for Industry 2026 study week (BE-MATHS-IN, PSA
+# Antwerp problem) — https://be-maths-in.be/mfi26/problems/
+# Uses OpenFOAM (openfoam.com) for CFD meshing/solving.
+#
+# make_mesh — pick a mesh scenario, build its geometry and mesh (blockMesh ->
+# surfaceFeatures -> snappyHexMesh -> checkMesh), and save it into
+# mesh/<name>/ for run_simulation to reuse. This is a separate, one-time(-ish)
+# step from running a simulation: meshing is independent of wind speed,
+# turbulence, and solver settings, so you only need to redo it when the
+# layout/domain/cell-size actually changes.
+#
+# Usage:
+#   ./make_mesh <mesh-name>                 # looks up mesh_params/<mesh-name>.yaml
+#   ./make_mesh path/to/some_mesh_params.yaml
+#
+# Mesh scenarios available out of the box (see mesh_params/):
+#   single_module   single yard module, mesh 0.25-2m
+#   template        starting point for a new mesh
+#
+# After this finishes, point a simulation params file (params/<name>.yaml) at
+# it with `mesh: <mesh-name>`, then run: ./run_simulation <that-scenario>
+#
+# Output goes to: mesh/<mesh-name>/ (constant/polyMesh, view_geometry, and
+# case_meta.json — the layout/domain metadata run_simulation needs). Running
+# this again for the same name OVERWRITES that mesh.
+
+set -e
+
+if [ -z "$1" ]; then
+    echo "Usage: ./make_mesh <mesh-name-or-path-to-mesh-params.yaml>" >&2
+    echo "  e.g.: ./make_mesh single_module" >&2
+    exit 1
+fi
+ARG="$1"
+
+cd "$(dirname "$0")"   # always run relative to this script's own folder
+
+# Resolve ARG to an actual mesh-params file: a literal path (as given, or
+# relative to this folder), else a bare mesh name looked up in mesh_params/.
+if [ -f "$ARG" ]; then
+    MESH_PARAMS_FILE="$ARG"
+elif [ -f "mesh_params/$ARG.yaml" ]; then
+    MESH_PARAMS_FILE="mesh_params/$ARG.yaml"
+elif [ -f "mesh_params/$ARG" ]; then
+    MESH_PARAMS_FILE="mesh_params/$ARG"
+else
+    echo "Mesh-params file not found: $ARG" >&2
+    echo "Tried: $ARG, mesh_params/$ARG.yaml" >&2
+    echo "Available mesh scenarios in mesh_params/:" >&2
+    for f in mesh_params/*.yaml; do
+        [ -f "$f" ] && echo "  $(basename "$f" .yaml)" >&2
+    done
+    exit 1
+fi
+
+# --- Make sure python3 has pyyaml/numpy-stl available ---
+if [ -z "$VIRTUAL_ENV" ]; then
+    if [ -f ".venv/bin/activate" ]; then
+        source ".venv/bin/activate"                                  # local venv (see ./setup)
+    elif [ -f "../psa/bin/activate" ]; then
+        source "../psa/bin/activate"                                 # local, one level under project root
+    elif [ -f "../../psa/bin/activate" ]; then
+        source "../../psa/bin/activate"                              # local, two levels under project root
+    else
+        echo "Warning: no known Python venv found — run ./setup first," >&2
+        echo "or relying on system python3 already having pyyaml + numpy-stl installed." >&2
+    fi
+fi
+
+MESH_NAME=$(basename "$MESH_PARAMS_FILE" .yaml)
+MESH_OUT_DIR="mesh/${MESH_NAME}"
+
+# OpenFOAM's fileName handling FATALLY errors on any path containing a space
+# ("fileName::stripInvalid() ... For debug level (= 2) > 1 this is considered
+# fatal"). So if we're running somewhere with a space in the path, stage the
+# actual meshing in a space-free /tmp directory, then copy just the finished
+# mesh into mesh/<name>/ afterwards.
+HERE="$(pwd)"
+case "$HERE" in
+    *" "*)
+        BUILD_DIR="/tmp/yard_mesh_stage/${MESH_NAME}"
+        echo "Note: this folder's path contains a space, which OpenFOAM cannot run from."
+        echo "Staging the mesh build in $BUILD_DIR, then copying the result into $MESH_OUT_DIR."
+        ;;
+    *)
+        BUILD_DIR="$MESH_OUT_DIR/_build"
+        ;;
+esac
+rm -rf "$BUILD_DIR"
+
+echo "=================================================="
+echo "Generating mesh geometry for '$MESH_NAME' from $MESH_PARAMS_FILE"
+echo "=================================================="
+python3 core/build_mesh.py --params "$MESH_PARAMS_FILE" --out "$BUILD_DIR"
+
+echo ""
+echo "=================================================="
+echo "Meshing (blockMesh -> surfaceFeatures -> snappyHexMesh -> checkMesh)"
+echo "=================================================="
+(
+    cd "$BUILD_DIR"
+
+    # set +e here, NOT just omitting set -e — this subshell INHERITS -e from
+    # the outer script (unlike a separately-invoked `bash script.sh`, a
+    # `( ... )` subshell shares shell options with its parent), so -e is
+    # already active at this point without an explicit `set -e` of our own.
+    # OpenFOAM's own bashrc internally runs `unalias wmRefresh` on first
+    # load, which exits 1 (nothing to unalias yet) — with -e inherited, that
+    # silently kills this whole subshell right here before meshing even
+    # starts. set +e neutralizes the inherited -e until we turn it back on
+    # ourselves, after sourcing.
+    set +e
+    echo "=== Loading OpenFOAM ==="
+    if [ -f /opt/openfoam11/etc/bashrc ]; then
+        source /opt/openfoam11/etc/bashrc
+    else
+        echo "Could not find OpenFOAM at /opt/openfoam11/etc/bashrc — adjust" >&2
+        echo "the 'Loading OpenFOAM' step in make_mesh for how it's installed" >&2
+        echo "on this machine (e.g. a different install path, or 'module load'" >&2
+        echo "on a cluster)." >&2
+        exit 1
+    fi
+
+    set -e
+    echo "=== blockMesh ==="
+    blockMesh
+    echo "=== surfaceFeatures ==="
+    surfaceFeatures
+    echo "=== snappyHexMesh (serial) ==="
+    snappyHexMesh -overwrite
+    echo "=== checkMesh ==="
+    checkMesh
+)
+
+echo ""
+echo "=================================================="
+echo "Saving mesh to $MESH_OUT_DIR"
+echo "=================================================="
+# Standard OpenFOAM case layout (constant/polyMesh, not flat polyMesh/) —
+# so mesh/<name>/ is directly viewable/debuggable with ./view_mesh,
+# checkMesh, paraFoam, etc. without any on-the-fly restructuring.
+mkdir -p "$MESH_OUT_DIR/constant" "$MESH_OUT_DIR/system"
+rm -rf "$MESH_OUT_DIR/constant/polyMesh" "$MESH_OUT_DIR/view_geometry"
+cp -r "$BUILD_DIR/constant/polyMesh" "$MESH_OUT_DIR/constant/polyMesh"
+cp -r "$BUILD_DIR/view_geometry" "$MESH_OUT_DIR/view_geometry"
+cp "$BUILD_DIR/system/controlDict" "$MESH_OUT_DIR/system/controlDict"
+cp "$BUILD_DIR/case_meta.json" "$MESH_OUT_DIR/case_meta.json"
+cp "$MESH_PARAMS_FILE" "$MESH_OUT_DIR/mesh_params.yaml"
+
+rm -rf "$BUILD_DIR"
+
+echo ""
+echo "=================================================="
+echo "ALL DONE — mesh '$MESH_NAME' saved to $MESH_OUT_DIR"
+echo "Point a simulation's params/<scenario>.yaml at it with: mesh: $MESH_NAME"
+echo "Then run: ./run_simulation <that-scenario>"
+echo "=================================================="

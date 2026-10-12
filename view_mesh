@@ -1,0 +1,53 @@
+#!/bin/bash
+# Author: Arjun Thenery Manikantan
+# Made for the Mathematics for Industry 2026 study week (BE-MATHS-IN, PSA
+# Antwerp problem) — https://be-maths-in.be/mfi26/problems/
+# Uses OpenFOAM (openfoam.com) for CFD meshing/solving.
+#
+# view_mesh — visualize an already-built mesh from mesh/<name>/: the snapped
+# stack surfaces, so you can confirm the container layout looks right
+# before running a simulation against it. Opens an interactive 3D window
+# (needs a display).
+#
+# Usage:
+#   ./view_mesh <mesh-name>
+#
+# Build a mesh first if you haven't:  ./make_mesh <mesh-name>
+
+set -e
+
+if [ -z "$1" ]; then
+    echo "Usage: ./view_mesh <mesh-name>" >&2
+    exit 1
+fi
+MESH_NAME="$1"
+
+cd "$(dirname "$0")"   # always run relative to this script's own folder
+
+MESH_DIR="mesh/$MESH_NAME"
+if [ ! -d "$MESH_DIR" ]; then
+    echo "Mesh '$MESH_NAME' not found at $MESH_DIR" >&2
+    echo "Build it first with:  ./make_mesh $MESH_NAME" >&2
+    echo "Available meshes:" >&2
+    for d in mesh/*/; do
+        [ -d "$d" ] && echo "  $(basename "$d")" >&2
+    done
+    exit 1
+fi
+
+# --- Make sure python3 has pyvista available ---
+if [ -z "$VIRTUAL_ENV" ]; then
+    if [ -f ".venv/bin/activate" ]; then
+        source ".venv/bin/activate"                                  # local venv (see ./setup)
+    elif [ -f "../psa/bin/activate" ]; then
+        source "../psa/bin/activate"                                 # local, one level under project root
+    elif [ -f "../../psa/bin/activate" ]; then
+        source "../../psa/bin/activate"                              # local, two levels under project root
+    else
+        echo "Warning: no known Python venv found — run ./setup first," >&2
+        echo "or relying on system python3 already having pyvista installed." >&2
+    fi
+fi
+
+cd "$MESH_DIR"
+python3 ../../tools/inspect_mesh.py

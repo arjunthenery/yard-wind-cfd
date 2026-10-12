@@ -1,0 +1,15 @@
+# Built mesh caches — regenerate with ./make_mesh <name>
+mesh/*/
+!mesh/.gitkeep
+
+# Simulation outputs — regenerate with ./run_simulation <name>
+out/*/
+!out/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editor/OS cruft
+.DS_Store

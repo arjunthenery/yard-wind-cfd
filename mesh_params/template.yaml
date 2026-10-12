@@ -1,0 +1,73 @@
+# mesh_params/template.yaml — starting point for a new mesh scenario.
+# Defines the MESH ONLY: layout, container/gap dimensions, domain sizing,
+# cell size, and wind ANGLE (the geometry is pre-rotated so the solver
+# always sees wind along +X, so wind direction affects the mesh — wind SPEED
+# does not).
+#
+# Copy this file to mesh_params/<your-name>.yaml, edit it, then build with:
+#   ./make_mesh <your-name>
+# Then reference it from a simulation params file (copy params/template.yaml
+# too) with: mesh: <your-name>
+
+# --- Axis convention (relative to the canal / quay) -------------------------
+# Based on the actual yard layout: modules and rows run PARALLEL to the
+# canal; bays extend AWAY from the canal, with bay 0 closest to the water.
+#
+#   canal / quay
+#   ═══════════════════════════════════════════════════════════════════
+#   [row1 row2 row3]   [row1 row2 row3]   [row1 row2 row3]     <- bay 0 (nearest canal)
+#   [row1 row2 row3]   [row1 row2 row3]   [row1 row2 row3]     <- bay 1
+#   [row1 row2 row3]   [row1 row2 row3]   [row1 row2 row3]     <- bay 2 (furthest inland)
+#         module 1            module 2            module 3
+#
+# +X = parallel to the canal — modules sit side by side along X (separated by
+#      module_gap), and rows within a module also step along X (row_gap).
+# +Y = perpendicular to the canal, pointing inland — bay 0 is closest to the
+#      water, higher bay indices move further from the canal (bay_gap).
+#
+# wind_angle_deg = 0   -> wind blows along +X (parallel to canal/quay)
+# wind_angle_deg = 90  -> wind blows along +Y (straight in OFF the canal,
+#                          hitting bay 0 first) — this is usually the
+#                          physically interesting case for a waterside yard.
+
+# --- Container dimensions (meters) -----------------------------------------
+container:
+  length: 12.192   # 40 ft
+  width: 3.048      # 10 ft
+  height: 3.048     # 10 ft
+
+# --- Gaps (meters) ----------------------------------------------------------
+row_gap: 0.4      # gap between rows WITHIN a module (both along X, parallel to canal)
+bay_gap: 0.4      # gap between bays (along Y, perpendicular to canal)
+module_gap: 3.0   # traffic lane between separate modules (along X, parallel to canal)
+
+# --- Layout: container count per (module, row, bay) position ----------------
+# 0 = empty bay (no stack there). Three levels of nesting:
+#   grid_heights[module][row][bay]
+# Each module is its own 2D row x bay matrix. Modules are listed left-to-right
+# as they sit along the canal (module 0 first).
+grid_heights:
+  - # module 0
+    - [0, 4, 2, 0]   # row 0: bay 0, bay 1, bay 2, bay 3
+    - [6, 0, 6, 0]   # row 1
+    - [0, 2, 0, 3]   # row 2
+    - [0, 5, 0, 6]   # row 3
+    - [0, 0, 0, 0]   # row 4
+    - [0, 0, 2, 5]   # row 5
+    - [6, 0, 0, 0]   # row 6
+    - [0, 4, 0, 0]   # row 7
+
+# --- Wind angle (affects mesh geometry — see header note) -------------------
+wind_angle_deg: 292.5   # 0  = wind blows parallel to the canal (along rows/modules)
+                          # 90 = wind blows straight in OFF the canal (crossing bays,
+                          #      hitting bay 0 first across all modules simultaneously)
+                          # any value in between is valid
+
+# --- Domain sizing (multiples of the TALLEST stack's height, except side_margin) --
+domain_upstream_mult: 10
+domain_downstream_mult: 10
+domain_top_mult: 5
+domain_side_margin: 8   # meters, added each side beyond the stack Y-extent
+
+# --- Mesh resolution ----------------------------------------------------------
+background_cell_size: 2.5   # meters — background blockMesh cell size, before refinement.

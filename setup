@@ -1,0 +1,43 @@
+#!/bin/bash
+# Author: Arjun Thenery Manikantan
+# Made for the Mathematics for Industry 2026 study week (BE-MATHS-IN, PSA
+# Antwerp problem) — https://be-maths-in.be/mfi26/problems/
+# Uses OpenFOAM (openfoam.com) for CFD meshing/solving.
+#
+# setup — one-time setup: create a local Python venv (.venv/) and install the
+# packages this pipeline's Python code needs (pyyaml, numpy-stl, pyvista,
+# vtk, matplotlib). ./make_mesh, ./run_simulation, ./view_mesh, and
+# ./view_results all auto-activate .venv/ if present, so just run this
+# once after cloning.
+#
+# NOTE: this only sets up the PYTHON side. You ALSO need OpenFOAM installed
+# separately (NOT pip-installable) — see the "Requirements" section in
+# README.md. make_mesh/run_simulation look for it at /opt/openfoam11/etc/bashrc;
+# adjust that in the scripts if yours lives elsewhere (e.g. a cluster module).
+#
+# Usage: ./setup
+
+set -e
+cd "$(dirname "$0")"   # always run relative to this script's own folder
+
+if [ -d ".venv" ]; then
+    echo ".venv/ already exists — reusing it (delete it first for a clean rebuild)."
+else
+    echo "Creating .venv/ ..."
+    python3 -m venv .venv
+fi
+
+source .venv/bin/activate
+echo "Installing Python dependencies from requirements.txt ..."
+pip install --upgrade pip -q
+pip install -r requirements.txt -q
+
+echo ""
+echo "=================================================="
+echo "Python environment ready in .venv/"
+echo ""
+echo "REMINDER: OpenFOAM itself is NOT installed by this script — it's a"
+echo "separate system/cluster install, not a pip package. Install it"
+echo "yourself (see README.md's Requirements section) before running"
+echo "./make_mesh or ./run_simulation."
+echo "=================================================="
